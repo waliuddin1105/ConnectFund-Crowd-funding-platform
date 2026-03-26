@@ -3,13 +3,14 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
+import AllCampaigns from './pages/AllCampaigns'
 
 
 function App() {
   const router = createBrowserRouter([
     { path: '/login', element: <Login /> },
     { path: '/register', element: <Register /> },
-
+    { path: '/all-campaigns', element: <AllCampaigns /> },
   ])
 
   return (
