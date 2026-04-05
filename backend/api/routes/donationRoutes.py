@@ -128,4 +128,78 @@ class DonorStats(Resource):
         }
 
         return response, 200
-    
+
+@donations_ns.route('/history/<int:donor_id>')
+class DonationHistory(Resource):
+    def get(self, donor_id):
+        """Get Donation History of a donor"""
+        donations = (
+            db.session.query(
+                Campaigns.image,
+                Campaigns.title,
+                Campaigns.category,
+                Campaigns.created_at,
+                Campaigns.status,
+                Donations.amount,
+                Donations.created_at.label("donation_date")
+            )
+            .join(Donations, Campaigns.campaign_id == Donations.campaign_id)
+            .filter(
+                Donations.user_id == donor_id,
+                Campaigns.status != CampaignStatus.pending  
+            )
+            .order_by(Donations.created_at.desc())
+            .all()
+        )
+
+        response_data = []
+        for d in donations:
+            response_data.append({
+                "image": d.image,
+                "title": d.title,
+                "category": d.category.value if hasattr(d.category, "value") else str(d.category),
+                "status": d.status.value if hasattr(d.status, "value") else str(d.status),
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "donation_date": d.donation_date.isoformat() if d.donation_date else None,
+                "amount": float(d.amount),
+            })
+
+        return {"donation_history": response_data}, 200
+
+
+@donations_ns.route('/active-campaigns/<int:donor_id>')
+class GetActiveCampaigns(Resource):
+    def get(self, donor_id):
+        try:
+            results = (
+                db.session.query(
+                    Campaigns.campaign_id,
+                    Campaigns.title,
+                    Campaigns.goal_amount,
+                    Campaigns.raised_amount,
+                    Campaigns.status
+                )
+                .join(Donations, Donations.campaign_id == Campaigns.campaign_id)
+                .filter(
+                    Campaigns.status == CampaignStatus.active,
+                    Donations.user_id == donor_id
+                )
+                .all()
+            )
+
+            campaigns_list = [
+                {
+                    "campaign_id": r.campaign_id,
+                    "title": r.title,
+                    "goal_amount": float(r.goal_amount),
+                    "raised_amount": float(r.raised_amount),
+                    "status": r.status.value
+                }
+                for r in results
+            ]
+
+            return {"active_campaigns": campaigns_list}, 200
+
+        except Exception as e:
+            db.session.rollback()
+            return {"success": False, "error": str(e)}, 500
