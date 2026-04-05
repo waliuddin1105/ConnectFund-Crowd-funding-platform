@@ -112,3 +112,94 @@ def view_all_donations_by_campaign(campaign_id):
 
 
 
+def updateDonationStatus(donation_id, status):
+    """Update the status of a donation with validation and return its dict.
+    Prevents manual completion that should be triggered by payments.
+    """
+    donation = Donations.query.get(donation_id)
+
+    if not donation:
+        raise ValueError(f"Could not find donation with donation id: {donation_id}")
+
+    try:
+        new_status = (
+            status if isinstance(status, DonationStatus) else DonationStatus(status)
+        )
+    except ValueError:
+        raise ValueError(f"Invalid donation status: {status}")
+
+    # Prevent manual completion - should only happen through payment
+    if (
+        new_status == DonationStatus.COMPLETED
+        and donation.status != DonationStatus.COMPLETED
+    ):
+        raise ValueError(
+            "Cannot manually mark donation as COMPLETED. Donations are completed through the payment system."
+        )
+
+    donation.status = new_status
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        raise RuntimeError(f"Could not update donation status. Error: {str(e)}")
+
+    return donation.to_dict()
+
+
+def cancel_donation(donation_id):
+    """Cancel a non-completed donation and return its dict.
+    Prevents canceling when already completed.
+    """
+    donation = Donations.query.get(donation_id)
+
+    if not donation:
+        raise ValueError("Donation not found")
+
+    # Prevent canceling completed donations
+    if donation.status == DonationStatus.COMPLETED:
+        raise ValueError(
+            "Cannot cancel a completed donation. The payment has already been processed and added to the campaign."
+        )
+
+    old_status = donation.status
+    donation.status = DonationStatus.CANCELLED
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        raise RuntimeError(f"Could not cancel the donation. Error: {str(e)}")
+
+    return donation.to_dict()
+
+
+def get_donation_statistics_by_campaign(campaign_id):
+    """Return donation statistics (counts and totals) for a campaign by status.
+    Useful for reporting and dashboards.
+    """
+    from api.models.cf_models import Campaigns
+
+    campaign = Campaigns.query.get(campaign_id)
+    if not campaign:
+        raise ValueError(f"Campaign not found with id {campaign_id}")
+
+    stats = {
+        "campaign_id": campaign_id,
+        "goal_amount": float(campaign.goal_amount),
+        "raised_amount": float(campaign.raised_amount),
+    }
+
+    for status in DonationStatus:
+        donations = Donations.query.filter_by(
+            campaign_id=campaign_id, status=status
+        ).all()
+
+        count = len(donations)
+        total = sum(float(d.amount) for d in donations)
+
+        stats[f"{status.value.lower()}_count"] = count
+        stats[f"{status.value.lower()}_total"] = total
+
+    return stats
