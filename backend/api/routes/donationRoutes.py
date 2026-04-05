@@ -46,3 +46,86 @@ class Donate(Resource):
         except SQLAlchemyError as e:
             db.session.rollback()
             return {"error": str(e)}, 500
+
+
+@donations_ns.route('/recent-donors/<int:campaign_id>')
+class RecentDonors(Resource):
+    def get(self, campaign_id):
+        try:
+            all_donations =view_all_donations_by_campaign(campaign_id)
+            all_donations.sort(key=lambda d: d['created_at'], reverse=True)
+
+            recent_donations = all_donations[:5]
+
+            
+            return {"donors": recent_donations}, 200
+
+        except ValueError:
+            return {"donors": []}, 200
+        except Exception as e:
+            db.session.rollback()
+            return {"success": False, "error": str(e)}, 500
+        
+@donations_ns.route('/donor-stats/<int:donor_id>')
+class DonorStats(Resource):
+    def get(self, donor_id):
+        """Donor Dashboard Stats"""
+        total_donated = (
+            db.session.query(func.sum(Donations.amount))
+            .filter(Donations.user_id == donor_id)
+            .scalar()
+        )
+        total_donated = float(total_donated or 0)
+
+        campaigns_supported = (
+            db.session.query(func.count(distinct(Donations.campaign_id)))
+            .filter(Donations.user_id == donor_id)
+            .scalar()
+        )
+        campaigns_supported = campaigns_supported or 0
+
+        recent_campaign = (
+            db.session.query(
+                Campaigns.campaign_id,
+                Campaigns.title,
+                Donations.created_at,
+                Donations.amount
+            )
+            .join(Donations, Campaigns.campaign_id == Donations.campaign_id)
+            .filter(Donations.user_id == donor_id)
+            .order_by(Donations.created_at.desc())
+            .first()
+        ) if total_donated != 0 else None
+
+        completed_campaigns_supported = (
+            db.session.query(func.count(distinct(Campaigns.campaign_id)))
+            .join(Donations, Campaigns.campaign_id == Donations.campaign_id)
+            .filter(
+                Donations.user_id == donor_id,
+                Campaigns.status == 'completed'
+            )
+            .scalar()
+        )
+        completed_campaigns_supported = completed_campaigns_supported or 0
+
+        if campaigns_supported > 0:
+            completion_rate = completed_campaigns_supported / campaigns_supported
+            impact_score = round(completion_rate * 5, 1)
+        else:
+            impact_score = 0.0
+        response = {
+            "total_donated": total_donated,
+            "campaigns_supported": campaigns_supported,
+            "completed_campaigns_supported": completed_campaigns_supported,
+            "impact_score": f"{impact_score}/5",
+            "based_on": "your contributions and completed campaigns",
+            "recent_campaign": {
+                "campaign_id": recent_campaign.campaign_id,
+                "title": recent_campaign.title,
+                "date": recent_campaign.created_at.isoformat(),
+                "amount": float(recent_campaign.amount)  
+            } if recent_campaign else None
+        }
+
+        return response, 200
+    
