@@ -339,33 +339,7 @@ export default function Home() {
         </section>
         <FAQs />
 
-        {/* Sticky Chat Button */}
-        <button
-          onClick={() => navigate('/chat')}
-          className="fixed bottom-6 right-6 z-50 group"
-          aria-label="Open chat"
-        >
-          <div className="relative">
-            {/* Glow effect */}
-            <div className="absolute inset-0 bg-blue-500 rounded-full blur-xl opacity-50 group-hover:opacity-75 transition-opacity"></div>
-            
-            {/* Button */}
-            <div className="relative flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-full shadow-2xl shadow-blue-500/50 transition-all group-hover:scale-110">
-              <MessageCircle className="h-7 w-7 text-white" />
-              
-              {/* Notification pulse */}
-              <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500 border-2 border-white"></span>
-              </span>
-            </div>
-          </div>
-          
-          {/* Tooltip */}
-          <span className="absolute bottom-full right-0 mb-2 px-3 py-1.5 bg-gray-900 text-white text-sm font-medium rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-            Chat with AI Assistant
-          </span>
-        </button>
+        
       </main>
 
       <style jsx>{`
