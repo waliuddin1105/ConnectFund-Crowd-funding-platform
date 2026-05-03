@@ -4,6 +4,7 @@ from flask_restx import Resource
 from api.helpers.security_helper import jwt_required
 from api.models.cf_models import Users, Campaigns, Donations, CampaignStatus
 from sqlalchemy import func, desc
+from api.helpers.cache_helper import cache
 
 from decimal import Decimal
 
@@ -24,54 +25,46 @@ class DisplayCreatorDashboard(Resource):
             if role != 'creator':
                 return {"Error": "Nothing to show"}, 403
             
-            campaigns = Campaigns.query.filter(
-                Campaigns.creator_id == creator.user_id, Campaigns.status == CampaignStatus.active
-            ).all()
+            # Single aggregated query: total_raised and active_campaigns count
+            agg = (
+                db.session.query(
+                    func.count(Campaigns.campaign_id).label("active_campaigns"),
+                    func.coalesce(func.sum(Donations.amount), 0).label("total_raised"),
+                    func.count(func.distinct(Donations.user_id)).label("total_donors"),
+                )
+                .outerjoin(Donations, Donations.campaign_id == Campaigns.campaign_id)
+                .filter(
+                    Campaigns.creator_id == creator.user_id,
+                    Campaigns.status == CampaignStatus.active,
+                )
+                .first()
+            )
 
-            total_raised = 0
-            active_campaigns = len(campaigns)
+            total_raised = float(agg.total_raised or 0)
+            active_campaigns = int(agg.active_campaigns or 0)
+            total_donors = int(agg.total_donors or 0)
 
-            for campaign in campaigns:
-                campaign_total = db.session.query(db.func.sum(Donations.amount))\
-                                .filter(Donations.campaign_id == campaign.campaign_id).scalar()
-                if campaign_total is None:
-                    campaign_total = 0
-                # convert Decimal to float
-                total_raised += float(campaign_total)
-                
-            total_donors = db.session.query(func.count(func.distinct(Donations.user_id)))\
-                            .join(Campaigns, Campaigns.campaign_id == Donations.campaign_id)\
-                            .filter(Campaigns.creator_id == creator.user_id,
-                                    Campaigns.status == CampaignStatus.active).scalar()
-            
-            if not total_donors:
-                total_donors = 0
+            recent_donation = (
+                db.session.query(Donations)
+                .join(Campaigns, Campaigns.campaign_id == Donations.campaign_id)
+                .filter(
+                    Campaigns.creator_id == creator.user_id,
+                    Campaigns.status == CampaignStatus.active,
+                )
+                .order_by(desc(Donations.created_at))
+                .first()
+            )
 
-            recent_donation = db.session.query(Donations)\
-                                .join(Campaigns, Campaigns.campaign_id == Donations.campaign_id)\
-                                .join(Users, Donations.user_id == Users.user_id)\
-                                .filter(Campaigns.creator_id == creator.user_id,
-                                        Campaigns.status == CampaignStatus.active)\
-                                .order_by(desc(Donations.created_at)).first()
-            
-            if recent_donation:
-                recent_donation_amount = {
-                    "donor_id": recent_donation.user_id,
-                    "amount": float(recent_donation.amount)  # convert Decimal to float
-                }
-            else:
-                recent_donation_amount = {
-                    "donor_id": None,
-                    "amount": 0
-                }
-            
+            recent_donation_amount = (
+                {"donor_id": recent_donation.user_id, "amount": float(recent_donation.amount)}
+                if recent_donation
+                else {"donor_id": None, "amount": 0}
+            )
+
             available_to_withdraw = db.session.query(db.func.sum(Campaigns.raised_amount))\
                                     .filter(Campaigns.creator_id == creator.user_id,
                                             Campaigns.status == CampaignStatus.completed).scalar()
-            if not available_to_withdraw:
-                available_to_withdraw = 0
-            else:
-                available_to_withdraw = float(available_to_withdraw)  # convert Decimal to float
+            available_to_withdraw = float(available_to_withdraw or 0)
             
             return {
                 "Success": {
@@ -103,16 +96,33 @@ class DisplayCreatorCampaigns(Resource):
             if role != 'creator':
                 return {"Error" : "Nothing to show"}, 403
             
-            campaigns = Campaigns.query.filter(
-                Campaigns.creator_id == creator.user_id, Campaigns.status == CampaignStatus.active
-                ).all()
+            # Single query: campaigns + donor count per campaign via subquery
+            donor_count_sub = (
+                db.session.query(
+                    Donations.campaign_id,
+                    func.count(func.distinct(Donations.user_id)).label("total_donors"),
+                )
+                .group_by(Donations.campaign_id)
+                .subquery()
+            )
+
+            rows = (
+                db.session.query(
+                    Campaigns,
+                    func.coalesce(donor_count_sub.c.total_donors, 0).label("total_donors"),
+                )
+                .outerjoin(donor_count_sub, Campaigns.campaign_id == donor_count_sub.c.campaign_id)
+                .filter(
+                    Campaigns.creator_id == creator.user_id,
+                    Campaigns.status == CampaignStatus.active,
+                )
+                .all()
+            )
             
             campaigns_list = []
-            for campaign in campaigns:
+            for campaign, total_donors in rows:
                 campaign_data = campaign.to_dict()
-                campaign_data['total_donors'] = db.session.query(func.count(func.distinct(Donations.user_id)))\
-                                  .filter(Donations.campaign_id == campaign.campaign_id).scalar() or 0
-                
+                campaign_data['total_donors'] = int(total_donors)
                 campaigns_list.append(campaign_data)
             
             return {
@@ -140,22 +150,21 @@ class RecentDonations(Resource):
             if role != 'creator':
                 return {"Error" : "Nothing to show"}, 403
             
-            donations_list = []
-            
-            recent_donations = db.session.query(Donations)\
-                            .join(Campaigns, Campaigns.campaign_id == Donations.campaign_id)\
-                            .join(Users, Donations.user_id == Users.user_id)\
-                            .filter(Campaigns.creator_id == creator.user_id,
-                                    Campaigns.status == CampaignStatus.active)\
-                            .order_by(desc(Donations.created_at)).all()
-            
-            for donation in recent_donations:
-                donations_data = donation.to_dict()
-                donations_list.append(donations_data)
+            recent_donations = (
+                db.session.query(Donations)
+                .join(Campaigns, Campaigns.campaign_id == Donations.campaign_id)
+                .join(Users, Donations.user_id == Users.user_id)
+                .filter(
+                    Campaigns.creator_id == creator.user_id,
+                    Campaigns.status == CampaignStatus.active,
+                )
+                .order_by(desc(Donations.created_at))
+                .all()
+            )
             
             return {
-                "user_id" : creator.user_id,
-                "recent_donations" : donations_list
+                "user_id": creator.user_id,
+                "recent_donations": [d.to_dict() for d in recent_donations],
             }, 200
         
         except Exception as e:

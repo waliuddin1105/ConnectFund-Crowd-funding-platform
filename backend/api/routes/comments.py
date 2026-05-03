@@ -59,8 +59,13 @@ class CommentDetails(Resource):
 
 @comments_ns.route('/get-comments/<int:campaign_id>')
 class GetComments(Resource):
+    @comments_ns.param('page', 'Page number (optional)')
+    @comments_ns.param('per_page', 'Items per page (default: 20, max: 100)')
     def get(self, campaign_id):
         try:
+            page = request.args.get('page', type=int)
+            per_page = min(request.args.get('per_page', 20, type=int), 100)
+
             sql = text("""
                 SELECT *
                 FROM comments_view
@@ -70,7 +75,7 @@ class GetComments(Resource):
 
             result = db.session.execute(sql, {"c": campaign_id}).fetchall()
 
-            comments = [
+            all_comments = [
                 {
                     "comment_id": c.comment_id,
                     "username": c.username,
@@ -83,7 +88,20 @@ class GetComments(Resource):
                 for c in result
             ]
 
-            return {"success": True, "comments": comments}, 200
+            if page:
+                total = len(all_comments)
+                start = (page - 1) * per_page
+                comments = all_comments[start: start + per_page]
+                return {
+                    "success": True,
+                    "page": page,
+                    "per_page": per_page,
+                    "total": total,
+                    "total_pages": (total + per_page - 1) // per_page,
+                    "comments": comments,
+                }, 200
+
+            return {"success": True, "comments": all_comments}, 200
 
         except Exception as e:
             db.session.rollback()
