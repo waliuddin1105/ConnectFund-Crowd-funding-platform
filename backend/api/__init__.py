@@ -3,6 +3,7 @@ from flask_restx import Api, Namespace
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_migrate import Migrate
+from flask_compress import Compress
 
 
 authorizations = {
@@ -19,9 +20,30 @@ app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://postgres:14Nov%402005@localhost:5432/crowdfunding_db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# Response compression (gzip / brotli)
+app.config["COMPRESS_REGISTER"] = True
+app.config["COMPRESS_MIMETYPES"] = [
+    "application/json",
+    "text/html",
+    "text/css",
+    "application/javascript",
+]
+app.config["COMPRESS_MIN_SIZE"] = 500
+
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 migrate = Migrate(app, db)
+
+compress = Compress(app)
+
+# Caching — SimpleCache by default; swap CACHE_TYPE/CACHE_REDIS_URL for Redis
+from api.helpers.cache_helper import init_cache
+init_cache(app)
+
+# Rate limiter
+from api.helpers.limiter import init_limiter
+init_limiter(app)
 
 api = Api(
     app,

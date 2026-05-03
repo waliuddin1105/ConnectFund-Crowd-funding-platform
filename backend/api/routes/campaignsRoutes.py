@@ -3,30 +3,54 @@ from flask_restx import Resource
 from api.models.cf_models import (
     Users,
     CampaignCategory,
-    Campaigns,  
+    Campaigns,
     Comments,
     CampaignStatus,
     Payments,
     UserRole,
     Donations,
-    CampaignUpdates,AdminReviews
+    CampaignUpdates, AdminReviews
 )
 from flask import jsonify, request
 from api import db, campaigns_ns
-from api.models.cf_models import Campaigns, Users
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func, text
 from datetime import datetime
 from ..helpers import campaign_helper
 from flask import g
 from api.helpers.security_helper import jwt_required
+from api.helpers.cache_helper import cache
+
+
+def _row_to_campaign_dict(c):
+    return {
+        "campaign_id": c.campaign_id,
+        "title": c.title,
+        "description": c.description,
+        "category": c.category.value if hasattr(c.category, "value") else c.category,
+        "goal_amount": float(c.goal_amount) if c.goal_amount else 0.0,
+        "raised_amount": float(c.raised_amount) if c.raised_amount else 0.0,
+        "status": c.status.value if hasattr(c.status, "value") else c.status,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        "creator_name": c.creator_name,
+        "image": c.image,
+    }
+
 
 @campaigns_ns.route('/') # AllCampaigns.jsx
 class AllCampaigns(Resource):
+    @campaigns_ns.param('page', 'Page number (default: returns all)')
+    @campaigns_ns.param('per_page', 'Items per page (default: 20, max: 100)')
+    @campaigns_ns.param('category', 'Filter by category (optional)')
     def get(self):
-        """Get all campaigns with their creator's name"""
+        """Get campaigns with optional pagination and category filter"""
         try:
-            campaigns = (
+            page = request.args.get('page', type=int)
+            per_page = min(request.args.get('per_page', 20, type=int), 100)
+            category_filter = request.args.get('category')
+
+            base_query = (
                 db.session.query(
                     Campaigns.campaign_id,
                     Campaigns.title,
@@ -42,29 +66,31 @@ class AllCampaigns(Resource):
                 )
                 .join(Users, Campaigns.creator_id == Users.user_id)
                 .filter(Campaigns.status != 'pending')
-                .all()
             )
-            
-            campaigns_list = [{
-                "campaign_id": c.campaign_id,
-                "title": c.title,
-                "description": c.description,
-                "category": c.category.value if hasattr(c.category, "value") else c.category,
-                "goal_amount": float(c.goal_amount) if c.goal_amount else 0.0,
-                "raised_amount": float(c.raised_amount) if c.raised_amount else 0.0,
-                "status": c.status.value if hasattr(c.status, "value") else c.status,
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-                "creator_name": c.creator_name,
-                "image": c.image
-            } for c in campaigns]
 
-            response = {
-                "success": True,
-                "campaigns": campaigns_list
-            }
+            if category_filter:
+                try:
+                    cat_enum = CampaignCategory(category_filter.strip().lower())
+                    base_query = base_query.filter(Campaigns.category == cat_enum)
+                except ValueError:
+                    return {"success": False, "error": f"Invalid category '{category_filter}'"}, 400
 
-            return response, 200
+            if page:
+                total = base_query.count()
+                campaigns = base_query.offset((page - 1) * per_page).limit(per_page).all()
+                campaigns_list = [_row_to_campaign_dict(c) for c in campaigns]
+                return {
+                    "success": True,
+                    "page": page,
+                    "per_page": per_page,
+                    "total": total,
+                    "total_pages": (total + per_page - 1) // per_page,
+                    "campaigns": campaigns_list,
+                }, 200
+            else:
+                campaigns = base_query.all()
+                campaigns_list = [_row_to_campaign_dict(c) for c in campaigns]
+                return {"success": True, "campaigns": campaigns_list}, 200
 
         except Exception as e:
             print("Error fetching campaigns:", e)
@@ -132,6 +158,9 @@ class CreateCampaign(Resource):
 
             db.session.add(campaign)
             db.session.commit()
+            cache.delete_memoized(_fully_funded_campaigns_data)
+            cache.delete('view//campaigns/stats')
+            cache.delete('view//campaigns/admin-key-stats')
             return {
                 "success": True,
                 "message": "Campaign created successfully",
@@ -143,21 +172,6 @@ class CreateCampaign(Resource):
             print('Error creating campaign:', str(e))
             import traceback
             traceback.print_exc()
-            return {"success": False, "error": str(e)}, 500
-
-
-@campaigns_ns.route('/fully-funded')
-class FullyFundedCampaigns(Resource):
-    def get(self):
-        """return fully-funded campaigns"""
-        try:
-            campaigns = campaign_helper.view_all_completed_campaigns()
-            return {
-                "success": True,
-                "count": len(campaigns),
-                "campaigns": campaigns
-            }, 200
-        except Exception as e:
             return {"success": False, "error": str(e)}, 500
 
 
@@ -272,88 +286,113 @@ class CommentLike(Resource):
             db.session.rollback()
             return {"success": False, "error": str(e)}, 500
 
-# API: POST http://{BACKEND_URL}/campaigns/fully-funded
+# API: GET http://{BACKEND_URL}/campaigns/fully-funded
+def _fully_funded_campaigns_data():
+    """Internal helper – fetches completed campaigns (cached separately)."""
+    campaigns = (
+        db.session.query(
+            Campaigns.campaign_id,
+            Campaigns.title,
+            Campaigns.description,
+            Campaigns.category,
+            Campaigns.goal_amount,
+            Campaigns.raised_amount,
+            Campaigns.status,
+            Campaigns.created_at,
+            Campaigns.updated_at,
+            Campaigns.image,
+            Users.username.label("creator_name")
+        )
+        .join(Users, Campaigns.creator_id == Users.user_id)
+        .filter(Campaigns.status == 'completed')
+        .all()
+    )
+    return [{
+        "campaign_id": c.campaign_id,
+        "title": c.title,
+        "description": c.description,
+        "category": c.category.value if hasattr(c.category, "value") else c.category,
+        "goal_amount": float(c.goal_amount) if c.goal_amount else 0.0,
+        "raised_amount": float(c.raised_amount) if c.raised_amount else 0.0,
+        "status": c.status.value if hasattr(c.status, "value") else c.status,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        "creator_name": c.creator_name,
+        "image": c.image
+    } for c in campaigns]
+
+
 @campaigns_ns.route('/fully-funded')
-class FullyFundedCampaigns(Resource): #Home.jsx
+class FullyFundedCampaigns(Resource):  # Home.jsx
+    @campaigns_ns.param('page', 'Page number (optional)')
+    @campaigns_ns.param('per_page', 'Items per page (default: 20, max: 100)')
+    @cache.cached(timeout=300, key_prefix='fully_funded_campaigns')
     def get(self):
-        """Get fully funded campaigns"""
+        """Get fully funded campaigns (cached 5 min), supports optional pagination"""
         try:
-            campaigns = (
-                db.session.query(
-                    Campaigns.campaign_id,
-                    Campaigns.title,
-                    Campaigns.description,
-                    Campaigns.category,
-                    Campaigns.goal_amount,
-                    Campaigns.raised_amount,
-                    Campaigns.status,
-                    Campaigns.created_at,
-                    Campaigns.updated_at,
-                    Campaigns.image,
-                    Users.username.label("creator_name")
-                )
-                .join(Users, Campaigns.creator_id == Users.user_id)
-                .filter(Campaigns.status == 'completed')
-                .all()
-            )
-            
-            campaigns_list = [{
-                "campaign_id": c.campaign_id,
-                "title": c.title,
-                "description": c.description,
-                "category": c.category.value if hasattr(c.category, "value") else c.category,
-                "goal_amount": float(c.goal_amount) if c.goal_amount else 0.0,
-                "raised_amount": float(c.raised_amount) if c.raised_amount else 0.0,
-                "status": c.status.value if hasattr(c.status, "value") else c.status,
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-                "creator_name": c.creator_name,
-                "image": c.image
-            } for c in campaigns]
+            page = request.args.get('page', type=int)
+            per_page = min(request.args.get('per_page', 20, type=int), 100)
+            campaigns_list = _fully_funded_campaigns_data()
 
-            response = {
-                "success": True,
-                "campaigns": campaigns_list
-            }
+            if page:
+                total = len(campaigns_list)
+                start = (page - 1) * per_page
+                campaigns_list = campaigns_list[start: start + per_page]
+                return {
+                    "success": True,
+                    "page": page,
+                    "per_page": per_page,
+                    "total": total,
+                    "total_pages": (total + per_page - 1) // per_page,
+                    "campaigns": campaigns_list,
+                }, 200
 
-            return response, 200
+            return {"success": True, "campaigns": campaigns_list}, 200
 
         except Exception as e:
             print("Error fetching campaigns:", e)
             return {"success": False, "error": str(e)}, 500
-        
-@campaigns_ns.route('/stats') #for Home page
+
+
+@campaigns_ns.route('/stats')  # for Home page
 class CampaignStats(Resource):
+    @cache.cached(timeout=180, key_prefix='campaign_stats')
     def get(self):
+        """Platform-wide stats (cached 3 min) — single aggregated query"""
         try:
-            # total raised
-            total_raised = db.session.query(func.sum(Donations.amount))\
-                .filter(Payments.payment_status == 'successful').scalar() or 0
-            total_raised = float(total_raised)
+            from sqlalchemy import case as sa_case
 
-            # total donors
-            total_donors = db.session.query(func.count(Users.user_id))\
-                .filter(Users.role == 'donor').scalar() or 0
+            row = db.session.query(
+                func.coalesce(func.sum(Donations.amount), 0).label("total_raised"),
+                func.count(func.distinct(Campaigns.campaign_id)).label("total_campaigns"),
+                func.sum(
+                    sa_case((Campaigns.status == CampaignStatus.completed, 1), else_=0)
+                ).label("completed_campaigns"),
+                func.sum(
+                    sa_case((Campaigns.status == CampaignStatus.active, 1), else_=0)
+                ).label("active_campaigns"),
+            ).outerjoin(Donations, Donations.campaign_id == Campaigns.campaign_id).first()
 
-            # success rate
-            total_campaigns = db.session.query(func.count(Campaigns.campaign_id)).scalar() or 1
-            completed_campaigns = db.session.query(func.count(Campaigns.campaign_id))\
-                .filter(Campaigns.status == "completed").scalar() or 0
+            total_donors = (
+                db.session.query(func.count(Users.user_id))
+                .filter(Users.role == "donor")
+                .scalar() or 0
+            )
 
-            success_rate = (completed_campaigns / total_campaigns) * 100
-
-            # active campaigns
-            active_campaigns = db.session.query(func.count(Campaigns.campaign_id))\
-                .filter(Campaigns.status == 'active').scalar() or 0
+            total_raised = float(row.total_raised or 0)
+            total_campaigns = int(row.total_campaigns or 1)
+            completed_campaigns = int(row.completed_campaigns or 0)
+            active_campaigns = int(row.active_campaigns or 0)
+            success_rate = round((completed_campaigns / total_campaigns) * 100, 2)
 
             return {
                 "success": True,
                 "stats": {
                     "total_raised": round(total_raised, 2),
                     "total_donors": total_donors,
-                    "success_rate": round(success_rate, 2),
-                    "active_campaigns": active_campaigns
-                }
+                    "success_rate": success_rate,
+                    "active_campaigns": active_campaigns,
+                },
             }, 200
 
         except Exception as e:
@@ -436,6 +475,11 @@ class DeleteCampaign(Resource):
             # Delete the campaign
             db.session.delete(campaign)
             db.session.commit()
+            cache.delete_memoized(_fully_funded_campaigns_data)
+            cache.delete('fully_funded_campaigns')
+            cache.delete('campaign_stats')
+            cache.delete('admin_key_stats')
+            cache.delete('highest_funded')
 
             return {"success": True, "message": "Campaign deleted successfully."}, 200
 
@@ -455,31 +499,39 @@ class CampaignsByStatus(Resource):
             except KeyError:
                 return {"status": "error", "message": "Invalid status value"}, 400
 
-            campaigns = (
+            query = (
                 db.session.query(Campaigns)
                 .filter(Campaigns.status == status_enum)
-                .all()
             )
 
-            result = []
-
-            for c in campaigns:
-                campaign_dict = c.to_dict()
-
-                if status_enum == CampaignStatus.rejected:
-                    review = (
-                        db.session.query(AdminReviews)
-                        .filter_by(campaign_id=c.campaign_id)
-                        .order_by(AdminReviews.created_at.desc())
-                        .first()
+            # Eagerly load latest review for rejected campaigns in a single query
+            if status_enum == CampaignStatus.rejected:
+                from sqlalchemy import select
+                latest_review_subq = (
+                    db.session.query(
+                        AdminReviews.campaign_id,
+                        AdminReviews.comments,
+                        AdminReviews.created_at,
                     )
-
-                    campaign_dict["rejection_reason"] = review.comments if review else None
-                    campaign_dict["rejected_at"] = (
-                        review.created_at.isoformat() if review else None
-                    )
-
-                result.append(campaign_dict)
+                    .distinct(AdminReviews.campaign_id)
+                    .order_by(AdminReviews.campaign_id, AdminReviews.created_at.desc())
+                    .subquery()
+                )
+                rows = (
+                    db.session.query(Campaigns, latest_review_subq)
+                    .outerjoin(latest_review_subq, Campaigns.campaign_id == latest_review_subq.c.campaign_id)
+                    .filter(Campaigns.status == status_enum)
+                    .all()
+                )
+                result = []
+                for c, rev_campaign_id, rev_comments, rev_created_at in rows:
+                    campaign_dict = c.to_dict()
+                    campaign_dict["rejection_reason"] = rev_comments
+                    campaign_dict["rejected_at"] = rev_created_at.isoformat() if rev_created_at else None
+                    result.append(campaign_dict)
+            else:
+                campaigns = query.all()
+                result = [c.to_dict() for c in campaigns]
 
             return {"status": "success", "data": result}, 200
 
@@ -490,27 +542,33 @@ class CampaignsByStatus(Resource):
 
 @campaigns_ns.route('/admin-key-stats')
 class AdminStats(Resource):
+    @cache.cached(timeout=120, key_prefix='admin_key_stats')
     def get(self):
-        """Admin dashboard statistics"""
+        """Admin dashboard statistics (cached 2 min) — single aggregated query"""
         try:
-            total_campaigns = Campaigns.query.count()
+            from sqlalchemy import case as sa_case
 
-            active_campaigns = Campaigns.query.filter_by(
-                status=CampaignStatus.active
-            ).count()
+            # Aggregate campaign counts and total raised in one pass
+            campaign_row = db.session.query(
+                func.count(Campaigns.campaign_id).label("total_campaigns"),
+                func.sum(
+                    sa_case((Campaigns.status == CampaignStatus.active, 1), else_=0)
+                ).label("active_campaigns"),
+                func.sum(
+                    sa_case((Campaigns.status == CampaignStatus.pending, 1), else_=0)
+                ).label("pending_campaigns"),
+            ).first()
 
-            total_raised = db.session.query(
-                db.func.coalesce(db.func.sum(Donations.amount), 0)
-            ).scalar()
-            total_raised = float(total_raised)
+            total_raised = float(
+                db.session.query(db.func.coalesce(db.func.sum(Donations.amount), 0)).scalar()
+            )
 
-            total_users = Users.query.count()
-            total_creators = Users.query.filter_by(role="creator").count()
-            total_donors = Users.query.filter_by(role="donor").count()
-
-            pending_campaigns = Campaigns.query.filter_by(
-                status=CampaignStatus.pending
-            ).count()
+            # Aggregate user counts in one pass
+            user_row = db.session.query(
+                func.count(Users.user_id).label("total_users"),
+                func.sum(sa_case((Users.role == "creator", 1), else_=0)).label("total_creators"),
+                func.sum(sa_case((Users.role == "donor", 1), else_=0)).label("total_donors"),
+            ).first()
 
             top_campaign = (
                 db.session.query(
@@ -518,37 +576,30 @@ class AdminStats(Resource):
                     db.func.coalesce(db.func.sum(Donations.amount), 0).label("raised")
                 )
                 .join(Donations, Campaigns.campaign_id == Donations.campaign_id, isouter=True)
-                .group_by(Campaigns.title)
+                .group_by(Campaigns.campaign_id, Campaigns.title)
                 .order_by(db.desc("raised"))
                 .first()
             )
-
-            if top_campaign:
-                top_campaign_title = top_campaign.title
-                top_campaign_raised = float(top_campaign.raised)
-            else:
-                top_campaign_title = None
-                top_campaign_raised = 0
 
             return {
                 "status": "success",
                 "data": {
                     "total_campaigns": {
-                        "count": total_campaigns,
-                        "active": active_campaigns
+                        "count": int(campaign_row.total_campaigns or 0),
+                        "active": int(campaign_row.active_campaigns or 0),
                     },
                     "total_raised": total_raised,
                     "total_users": {
-                        "count": total_users,
-                        "creators": total_creators,
-                        "donors": total_donors
+                        "count": int(user_row.total_users or 0),
+                        "creators": int(user_row.total_creators or 0),
+                        "donors": int(user_row.total_donors or 0),
                     },
-                    "pending_campaigns": pending_campaigns,
+                    "pending_campaigns": int(campaign_row.pending_campaigns or 0),
                     "top_campaign": {
-                        "title": top_campaign_title,
-                        "raised": top_campaign_raised
-                    }
-                }
+                        "title": top_campaign.title if top_campaign else None,
+                        "raised": float(top_campaign.raised) if top_campaign else 0,
+                    },
+                },
             }, 200
 
         except Exception as e:
@@ -557,53 +608,49 @@ class AdminStats(Resource):
 @campaigns_ns.route('/get-creators')
 class CreatorsData(Resource):
     def get(self):
-        """Fetch all creator statistics with pagination"""
+        """Fetch all creator statistics with pagination (no N+1 queries)"""
         try:
             page = int(request.args.get("page", 1))
-            per_page = int(request.args.get("per_page", 10))
+            per_page = min(int(request.args.get("per_page", 10)), 100)
 
-            query = db.session.query(Users).filter(Users.role == UserRole.creator)
+            # Single aggregated subquery for campaign stats per creator
+            campaign_stats = (
+                db.session.query(
+                    Campaigns.creator_id,
+                    func.count(Campaigns.campaign_id).label("campaign_count"),
+                    func.coalesce(func.sum(Campaigns.raised_amount), 0).label("total_raised"),
+                )
+                .group_by(Campaigns.creator_id)
+                .subquery()
+            )
 
-            total_items = query.count()
+            base_query = (
+                db.session.query(
+                    Users,
+                    func.coalesce(campaign_stats.c.campaign_count, 0).label("campaign_count"),
+                    func.coalesce(campaign_stats.c.total_raised, 0).label("total_raised"),
+                )
+                .outerjoin(campaign_stats, Users.user_id == campaign_stats.c.creator_id)
+                .filter(Users.role == UserRole.creator)
+            )
+
+            total_items = base_query.count()
             total_pages = (total_items + per_page - 1) // per_page
 
-            creators = query.offset((page - 1) * per_page).limit(per_page).all()
+            rows = base_query.offset((page - 1) * per_page).limit(per_page).all()
 
-            result = []
-
-            for creator in creators:
-                try:
-                    campaign_count = (
-                        db.session.query(Campaigns)
-                        .filter_by(creator_id=creator.user_id)
-                        .count()
-                    )
-
-                    total_raised = (
-                        db.session.query(db.func.sum(Campaigns.raised_amount))
-                        .filter(Campaigns.creator_id == creator.user_id)
-                        .scalar()
-                    )
-                    total_raised = float(total_raised or 0)
-
-                    creator_dict = {
-                        "creator_id": creator.user_id,
-                        "name": creator.username,
-                        "email": creator.email,
-                        "profile_image": creator.profile_image,
-                        "campaigns": campaign_count,
-                        "total_raised": total_raised,
-                        "join_date": (
-                            creator.created_at.strftime("%b %d, %Y")
-                            if creator.created_at else None
-                        )
-                    }
-
-                    result.append(creator_dict)
-
-                except Exception as e:
-                    print(f"Error processing creator {creator.user_id}: {str(e)}")
-                    continue
+            result = [
+                {
+                    "creator_id": u.user_id,
+                    "name": u.username,
+                    "email": u.email,
+                    "profile_image": u.profile_image,
+                    "campaigns": int(campaign_count),
+                    "total_raised": float(total_raised),
+                    "join_date": u.created_at.strftime("%b %d, %Y") if u.created_at else None,
+                }
+                for u, campaign_count, total_raised in rows
+            ]
 
             return {
                 "status": "success",
@@ -611,69 +658,59 @@ class CreatorsData(Resource):
                 "per_page": per_page,
                 "total_items": total_items,
                 "total_pages": total_pages,
-                "data": result
+                "data": result,
             }, 200
 
         except Exception as e:
             db.session.rollback()
-            return {
-                "status": "error",
-                "message": str(e)
-            }, 500
+            return {"status": "error", "message": str(e)}, 500
 
 @campaigns_ns.route('/get-donors')
 class UsersData(Resource):
     def get(self):
-        """Fetch all donor statistics with pagination"""
+        """Fetch all donor statistics with pagination (no N+1 queries)"""
         try:
             page = int(request.args.get("page", 1))
-            per_page = int(request.args.get("per_page", 10))
+            per_page = min(int(request.args.get("per_page", 10)), 100)
 
-            query = db.session.query(Users).filter(Users.role == UserRole.donor)
+            # Single aggregated subquery for donation stats per donor
+            donation_stats = (
+                db.session.query(
+                    Donations.user_id,
+                    func.coalesce(func.sum(Donations.amount), 0).label("total_donations"),
+                    func.count(func.distinct(Donations.campaign_id)).label("campaigns_supported"),
+                )
+                .group_by(Donations.user_id)
+                .subquery()
+            )
 
-            total_items = query.count()
+            base_query = (
+                db.session.query(
+                    Users,
+                    func.coalesce(donation_stats.c.total_donations, 0).label("total_donations"),
+                    func.coalesce(donation_stats.c.campaigns_supported, 0).label("campaigns_supported"),
+                )
+                .outerjoin(donation_stats, Users.user_id == donation_stats.c.user_id)
+                .filter(Users.role == UserRole.donor)
+            )
+
+            total_items = base_query.count()
             total_pages = (total_items + per_page - 1) // per_page
 
-            donors = query.offset((page - 1) * per_page).limit(per_page).all()
+            rows = base_query.offset((page - 1) * per_page).limit(per_page).all()
 
-            result = []
-
-            for donor in donors:
-                try:
-                    # Total donations made (SUM)
-                    total_donations = (
-                        db.session.query(db.func.sum(Donations.amount))
-                        .filter(Donations.user_id == donor.user_id)
-                        .scalar()
-                    )
-                    total_donations = float(total_donations or 0)
-
-                    # Unique campaigns supported
-                    campaigns_supported = (
-                        db.session.query(Donations.campaign_id)
-                        .filter(Donations.user_id == donor.user_id)
-                        .distinct()
-                        .count()
-                    )
-
-                    donor_dict = {
-                        "user_id": donor.user_id,
-                        "name": donor.username,
-                        "email": donor.email,
-                        "profile_image": donor.profile_image,
-                        "total_donations": total_donations,
-                        "campaigns_supported": campaigns_supported,
-                        "join_date": (
-                            donor.created_at.strftime("%b %d, %Y")
-                            if donor.created_at else None
-                        )
-                    }
-
-                    result.append(donor_dict)
-
-                except Exception as e:
-                    print(f"Error processing donor {donor.user_id}: {str(e)}")
-                    continue
+            result = [
+                {
+                    "user_id": u.user_id,
+                    "name": u.username,
+                    "email": u.email,
+                    "profile_image": u.profile_image,
+                    "total_donations": float(total_donations),
+                    "campaigns_supported": int(campaigns_supported),
+                    "join_date": u.created_at.strftime("%b %d, %Y") if u.created_at else None,
+                }
+                for u, total_donations, campaigns_supported in rows
+            ]
 
             return {
                 "status": "success",
@@ -681,7 +718,7 @@ class UsersData(Resource):
                 "per_page": per_page,
                 "total_items": total_items,
                 "total_pages": total_pages,
-                "data": result
+                "data": result,
             }, 200
 
         except Exception as e:
@@ -692,26 +729,24 @@ class UsersData(Resource):
 
 @campaigns_ns.route('/highest-funded')
 class HighestFunded(Resource):
+    @cache.cached(timeout=300, key_prefix='highest_funded')
     def get(self):
-        """Fetch top 5 highest funded campaigns along with donor count"""
+        """Fetch top 5 highest funded campaigns with donor count (single query, cached 5 min)"""
         try:
-            top_campaigns = (
-                db.session.query(Campaigns)
+            rows = (
+                db.session.query(
+                    Campaigns,
+                    func.count(func.distinct(Donations.user_id)).label("donor_count"),
+                )
+                .outerjoin(Donations, Campaigns.campaign_id == Donations.campaign_id)
+                .group_by(Campaigns.campaign_id)
                 .order_by(Campaigns.raised_amount.desc())
                 .limit(5)
                 .all()
             )
 
-            result = []
-
-            for c in top_campaigns:
-                donor_count = (
-                    db.session.query(func.count(func.distinct(Donations.user_id)))
-                    .filter(Donations.campaign_id == c.campaign_id)
-                    .scalar()
-                )
-
-                campaign_dict = {
+            result = [
+                {
                     "campaign_id": c.campaign_id,
                     "title": c.title,
                     "raised_amount": float(c.raised_amount or 0),
@@ -722,8 +757,8 @@ class HighestFunded(Resource):
                         "profile_image": c.creator.profile_image,
                     } if c.creator else None,
                 }
-
-                result.append(campaign_dict)
+                for c, donor_count in rows
+            ]
 
             return {"status": "success", "data": result}, 200
 

@@ -48,6 +48,9 @@ class CampaignPaymentStatus(Enum):
 
 class Users(db.Model):
     __tablename__ = "users"
+    __table_args__ = (
+        db.Index("ix_users_role", "role"),
+    )
 
     user_id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), nullable=False, unique=True)
@@ -60,7 +63,6 @@ class Users(db.Model):
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    # FIXED: Added the missing relationship for liked comments
     liked_comments = db.relationship(
         "Comments",
         secondary=user_comment_likes,
@@ -83,15 +85,15 @@ class Users(db.Model):
             "profile_image": self.profile_image
         }
 
-    liked_comments = db.relationship(
-    "Comments", secondary=user_comment_likes, back_populates="liked_by_users"
-    )
-    liked_comments = db.relationship(
-    "Comments", secondary=user_comment_likes, back_populates="liked_by_users"
-    )
-
 class Campaigns(db.Model):
     __tablename__ = "campaigns"
+    __table_args__ = (
+        db.Index("ix_campaigns_status", "status"),
+        db.Index("ix_campaigns_creator_id", "creator_id"),
+        db.Index("ix_campaigns_category", "category"),
+        db.Index("ix_campaigns_raised_amount", "raised_amount"),
+        db.Index("ix_campaigns_status_creator", "status", "creator_id"),
+    )
 
     campaign_id = db.Column(db.Integer, primary_key=True)
     creator_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False)
@@ -157,7 +159,10 @@ class Campaigns(db.Model):
 
 class Comments(db.Model):
     __tablename__ = "comments"
-    
+    __table_args__ = (
+        db.Index("ix_comments_campaign_id", "campaign_id"),
+        db.Index("ix_comments_user_id", "user_id"),
+    )
     
     comment_id = db.Column(db.Integer, primary_key=True)
     campaign_id = db.Column(
@@ -204,6 +209,10 @@ class Comments(db.Model):
 
 class Payments(db.Model):
     __tablename__ = "payments"
+    __table_args__ = (
+        db.Index("ix_payments_donation_id", "donation_id"),
+        db.Index("ix_payments_status", "payment_status"),
+    )
 
     payment_id = db.Column(db.Integer, primary_key=True)
     donation_id = db.Column(
@@ -237,6 +246,12 @@ class Payments(db.Model):
 
 class Donations(db.Model):
     __tablename__ = "donations"
+    __table_args__ = (
+        db.Index("ix_donations_user_id", "user_id"),
+        db.Index("ix_donations_campaign_id", "campaign_id"),
+        db.Index("ix_donations_user_campaign", "user_id", "campaign_id"),
+        db.Index("ix_donations_created_at", "created_at"),
+    )
 
     donation_id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False)
@@ -276,6 +291,11 @@ class Donations(db.Model):
 
 class Follows(db.Model):
     __tablename__ = "follows"
+    __table_args__ = (
+        db.Index("ix_follows_user_id", "user_id"),
+        db.Index("ix_follows_campaign_id", "campaign_id"),
+        db.UniqueConstraint("user_id", "campaign_id", name="uq_follows_user_campaign"),
+    )
 
     follow_id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False)
@@ -334,6 +354,10 @@ class CampaignUpdates(db.Model):
 
 class AdminReviews(db.Model):
     __tablename__ = "admin_reviews"
+    __table_args__ = (
+        db.Index("ix_admin_reviews_campaign_id", "campaign_id"),
+        db.Index("ix_admin_reviews_admin_id", "admin_id"),
+    )
 
     review_id = db.Column(db.Integer, primary_key=True)
     admin_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False)

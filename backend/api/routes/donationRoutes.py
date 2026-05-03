@@ -7,6 +7,7 @@ from api.helpers.donation_helper import create_donation,view_all_donations_by_ca
 from api.models.cf_models import Donations,Campaigns,CampaignStatus,CampaignPaymentStatus,Payments
 from sqlalchemy import func,distinct
 from sqlalchemy.exc import SQLAlchemyError
+from api.helpers.cache_helper import cache
 
 @donations_ns.route('')
 class Donate(Resource):
@@ -39,7 +40,13 @@ class Donate(Resource):
 
             donation.status = "completed"
             payment.payment_status = CampaignPaymentStatus.successful
-            db.session.commit()  
+            db.session.commit()
+
+            # Invalidate donor-specific and platform-wide caches
+            cache.delete(f'donor_stats_{data["user_id"]}')
+            cache.delete('campaign_stats')
+            cache.delete('admin_key_stats')
+            cache.delete('highest_funded')
 
             return {"message": "Donation successful"}
 
@@ -69,7 +76,12 @@ class RecentDonors(Resource):
 @donations_ns.route('/donor-stats/<int:donor_id>')
 class DonorStats(Resource):
     def get(self, donor_id):
-        """Donor Dashboard Stats"""
+        """Donor Dashboard Stats (cached per donor)"""
+        cache_key = f'donor_stats_{donor_id}'
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached, 200
+
         total_donated = (
             db.session.query(func.sum(Donations.amount))
             .filter(Donations.user_id == donor_id)
@@ -127,13 +139,19 @@ class DonorStats(Resource):
             } if recent_campaign else None
         }
 
+        cache.set(cache_key, response, timeout=180)
         return response, 200
 
 @donations_ns.route('/history/<int:donor_id>')
 class DonationHistory(Resource):
+    @donations_ns.param('page', 'Page number (optional)')
+    @donations_ns.param('per_page', 'Items per page (default: 20, max: 100)')
     def get(self, donor_id):
-        """Get Donation History of a donor"""
-        donations = (
+        """Get Donation History of a donor with optional pagination"""
+        page = request.args.get('page', type=int)
+        per_page = min(request.args.get('per_page', 20, type=int), 100)
+
+        base_query = (
             db.session.query(
                 Campaigns.image,
                 Campaigns.title,
@@ -149,12 +167,16 @@ class DonationHistory(Resource):
                 Campaigns.status != CampaignStatus.pending  
             )
             .order_by(Donations.created_at.desc())
-            .all()
         )
 
-        response_data = []
-        for d in donations:
-            response_data.append({
+        if page:
+            total = base_query.count()
+            donations = base_query.offset((page - 1) * per_page).limit(per_page).all()
+        else:
+            donations = base_query.all()
+
+        response_data = [
+            {
                 "image": d.image,
                 "title": d.title,
                 "category": d.category.value if hasattr(d.category, "value") else str(d.category),
@@ -162,9 +184,17 @@ class DonationHistory(Resource):
                 "created_at": d.created_at.isoformat() if d.created_at else None,
                 "donation_date": d.donation_date.isoformat() if d.donation_date else None,
                 "amount": float(d.amount),
-            })
+            }
+            for d in donations
+        ]
 
-        return {"donation_history": response_data}, 200
+        resp = {"donation_history": response_data}
+        if page:
+            resp["page"] = page
+            resp["per_page"] = per_page
+            resp["total"] = total
+            resp["total_pages"] = (total + per_page - 1) // per_page
+        return resp, 200
 
 
 @donations_ns.route('/active-campaigns/<int:donor_id>')
