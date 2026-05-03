@@ -159,8 +159,8 @@ class CreateCampaign(Resource):
             db.session.add(campaign)
             db.session.commit()
             cache.delete_memoized(_fully_funded_campaigns_data)
-            cache.delete('view//campaigns/stats')
-            cache.delete('view//campaigns/admin-key-stats')
+            cache.delete('campaign_stats')
+            cache.delete('admin_key_stats')
             return {
                 "success": True,
                 "message": "Campaign created successfully",
@@ -287,6 +287,7 @@ class CommentLike(Resource):
             return {"success": False, "error": str(e)}, 500
 
 # API: GET http://{BACKEND_URL}/campaigns/fully-funded
+@cache.memoize(timeout=300)
 def _fully_funded_campaigns_data():
     """Internal helper – fetches completed campaigns (cached separately)."""
     campaigns = (
@@ -326,7 +327,6 @@ def _fully_funded_campaigns_data():
 class FullyFundedCampaigns(Resource):  # Home.jsx
     @campaigns_ns.param('page', 'Page number (optional)')
     @campaigns_ns.param('per_page', 'Items per page (default: 20, max: 100)')
-    @cache.cached(timeout=300, key_prefix='fully_funded_campaigns')
     def get(self):
         """Get fully funded campaigns (cached 5 min), supports optional pagination"""
         try:
@@ -476,7 +476,6 @@ class DeleteCampaign(Resource):
             db.session.delete(campaign)
             db.session.commit()
             cache.delete_memoized(_fully_funded_campaigns_data)
-            cache.delete('fully_funded_campaigns')
             cache.delete('campaign_stats')
             cache.delete('admin_key_stats')
             cache.delete('highest_funded')
