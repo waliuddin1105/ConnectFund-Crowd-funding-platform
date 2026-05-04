@@ -1,6 +1,6 @@
 from api import payments_ns, db
 from flask_restx import Resource
-from api.fields.paymentsField import payments_data
+from api.fields.paymentsFields import payments_data
 from api.helpers.security_helper import jwt_required
 from api.models.cf_models import Donations,Campaigns,Payments,Users
 from sqlalchemy import func,distinct

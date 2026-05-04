@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Campaign Review Update</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #f5f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif;
+      color: #2d3748;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #fdcb6e 0%, #fab1a0 100%);
+      color: #2d3748;
+      text-align: center;
+      padding: 40px 30px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .content {
+      padding: 40px 35px;
+    }
+    .content h2 {
+      color: #d63031;
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 20px 0;
+    }
+    .content p {
+      font-size: 16px;
+      color: #4a5568;
+      margin: 0 0 16px 0;
+    }
+    .campaign-name {
+      color: #0077b6;
+      font-weight: 600;
+    }
+    .reason-box {
+      background-color: #fef5e7;
+      border-left: 4px solid #fdcb6e;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 24px 0;
+      color: #856404;
+      font-style: italic;
+    }
+    .footer {
+      background-color: #f8fafc;
+      padding: 24px 35px;
+      font-size: 14px;
+      color: #718096;
+      border-top: 1px solid #e2e8f0;
+    }
+    .support-link {
+      color: #0077b6;
+      font-weight: 600;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⚠️ Campaign Review Update</h1>
+    </div>
+    <div class="content">
+      <h2>Hi {{username}},</h2>
+      <p>After reviewing your campaign <span class="campaign-name">{{campaign_name}}</span>, we're unable to approve it at this time.</p>
+      <div class="reason-box">
+          <li>{{comments}}</li>
+        </ul>
+      </div>
+
+      <div class="cta">
+        <a href="https://crowdfundpk.com/">Start Exploring</a>
+      </div>
+
+      <p style="font-size: 14px; color: #718096;">If you didn't create this account, please ignore this email or contact our support team.</p>
+    </div>
+    <div class="footer">
+      © 2025 CrowdFundPK. All rights reserved.<br>
+      You're receiving this because you signed up on our platform.
+    </div>
+  </div>

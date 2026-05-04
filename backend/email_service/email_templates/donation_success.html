@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Donation Successful</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #f5f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif;
+      color: #2d3748;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #0077b6 0%, #00b4d8 100%);
+      color: #ffffff;
+      text-align: center;
+      padding: 40px 30px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .content {
+      padding: 40px 35px;
+    }
+    .content h2 {
+      color: #0077b6;
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 20px 0;
+    }
+    .content p {
+      font-size: 16px;
+      color: #4a5568;
+      margin: 0 0 16px 0;
+    }
+    .campaign-name {
+      color: #00b894;
+      font-weight: 600;
+    }
+    .details {
+      background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
+      padding: 24px;
+      border-radius: 12px;
+      margin: 28px 0;
+      border: 1px solid #e2e8f0;
+    }
+    .details p {
+      margin: 10px 0;
+      font-size: 15px;
+    }
+    .details strong {
+      color: #2d3748;
+      font-weight: 600;
+      display: inline-block;
+      min-width: 140px;
+    }
+    .dashboard-link {
+      color: #0077b6;
+      font-weight: 600;
+      text-decoration: none;
+      border-bottom: 2px solid #00b4d8;
+    }
+    .footer {
+      background-color: #f8fafc;
+      padding: 24px 35px;
+      font-size: 14px;
+      color: #718096;
+      border-top: 1px solid #e2e8f0;
+      text-align: center;
+    }
+    .footer a {
+      color: #0077b6;
+      text-decoration: none;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>💙 Thank You, {{username}}!</h1>
+    </div>
+    <div class="content">
+      <h2>Your donation was successful!</h2>
+      <p>
+        We truly appreciate your generous contribution to <span class="campaign-name">{{campaign_name}}</span>.
+        Your support helps bring meaningful change and makes a real difference.
+      </p>
+      <div class="details">
+        <p><strong>Donation Amount:</strong> Rs. {{donation_amount}}</p>
+        <p><strong>Payment Method:</strong> {{payment_method}}</p>
+        <p><strong>Payment Time:</strong> {{payment_time}}</p>
+      </div>
+      <p>
+        You can view your donation history anytime by visiting your
+        <a href="https://crowdfundpk.com/dashboard" class="dashboard-link">CrowdFundPK dashboard</a>.
+      </p>
+    </div>
+    <div class="footer">
+      <p>Thank you for being part of the CrowdFundPK community ❤️</p>
+      <p><a href="https://crowdfundpk.com">Visit our website</a></p>
+    </div>
+  </div>
+</body>
+</html>"""

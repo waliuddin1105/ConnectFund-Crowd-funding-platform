@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to CrowdFundPK!</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #f5f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif;
+      color: #2d3748;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #0077b6 0%, #00b4d8 100%);
+      color: #ffffff;
+      text-align: center;
+      padding: 50px 30px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .header p {
+      margin: 12px 0 0 0;
+      font-size: 18px;
+      opacity: 0.95;
+    }
+    .content {
+      padding: 40px 35px;
+    }
+    .content h2 {
+      color: #0077b6;
+      font-size: 24px;
+      font-weight: 600;
+      margin: 0 0 20px 0;
+    }
+    .content p {
+      font-size: 16px;
+      color: #4a5568;
+      margin: 0 0 16px 0;
+    }
+    .features {
+      background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
+      padding: 28px;
+      border-radius: 12px;
+      margin: 28px 0;
+      border: 1px solid #e2e8f0;
+    }
+    .features h3 {
+      color: #2d3748;
+      font-size: 18px;
+      margin: 0 0 16px 0;
+      font-weight: 600;
+    }
+    .features ul {
+      margin: 0;
+      padding-left: 24px;
+      color: #4a5568;
+    }
+    .features li {
+      margin: 10px 0;
+      font-size: 15px;
+    }
+    .cta {
+      text-align: center;
+      margin: 32px 0;
+    }
+    .cta a {
+      display: inline-block;
+      background: linear-gradient(135deg, #0077b6 0%, #00b4d8 100%);
+      color: #ffffff;
+      padding: 14px 40px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 16px;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 12px rgba(0, 119, 182, 0.3);
+    }
+    .cta a:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 119, 182, 0.4);
+    }
+    .footer {
+      background-color: #f8fafc;
+      padding: 24px 35px;
+      font-size: 14px;
+      color: #718096;
+      border-top: 1px solid #e2e8f0;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Welcome to CrowdFundPK! 🎉</h1>
+      <p>Pakistan's Premier Crowdfunding Platform</p>
+    </div>
+    <div class="content">
+      <h2>Hello, {{username}}!</h2>
+      <p>We're thrilled to have you join <strong>CrowdFundPK</strong> – Pakistan's trusted platform for empowering dreams and supporting meaningful causes.</p>
+      
+      <div class="features">
+        <h3>✨ What you can do:</h3>
+        <ul>
+          <li>Discover inspiring campaigns from across Pakistan</li>
+          <li>Support causes that matter to you</li>
+          <li>Launch your own fundraising campaign</li>

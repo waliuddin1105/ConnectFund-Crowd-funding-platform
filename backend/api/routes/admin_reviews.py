@@ -2,7 +2,7 @@ from flask_restx import Resource
 from flask import  request
 from api import db,admin_reviews_ns
 from api.models.cf_models import Campaigns, Users,Comments,AdminReviews,CampaignStatus
-from api.fields.adminReviewsFields import admin_reviews_data
+from api.fields.adminReviewFields import admin_reviews_data
 from email_service.email_sender import send_email
 from ..helpers.limiter import limiter
 
