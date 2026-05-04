@@ -3,8 +3,8 @@ from flask_restx import Api, Namespace
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_migrate import Migrate
-from flask_compress import Compress
-
+from configparser import ConfigParser
+from flask_cors import CORS
 
 authorizations = {
     'bearer authorizations':
@@ -17,43 +17,30 @@ authorizations = {
 }
 
 app = Flask(__name__)
+api = Api(app, authorizations=authorizations, security='bearer authorizations')
 
-app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://postgres:14Nov%402005@localhost:5432/crowdfunding_db"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False
+    }
+})
 
-# Response compression (gzip / brotli)
-app.config["COMPRESS_REGISTER"] = True
-app.config["COMPRESS_MIMETYPES"] = [
-    "application/json",
-    "text/html",
-    "text/css",
-    "application/javascript",
-]
-app.config["COMPRESS_MIN_SIZE"] = 500
+
+
+config_parser = ConfigParser(interpolation=None)
+config_parser.read('config.cfg')
+
+app.config['SQLALCHEMY_DATABASE_URI'] = config_parser.get('global', 'SQLALCHEMY_DATABASE_URI')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = config_parser.get('global', 'SECRET_KEY')
 
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 migrate = Migrate(app, db)
-
-compress = Compress(app)
-
-# Caching — SimpleCache by default; swap CACHE_TYPE/CACHE_REDIS_URL for Redis
-from api.helpers.cache_helper import init_cache
-init_cache(app)
-
-# Rate limiter
-from api.helpers.limiter import init_limiter
-init_limiter(app)
-
-api = Api(
-    app,
-    version='1.0',
-    title="Crowdfunding platform",
-    description="Api for crowdfunding platform",
-    authorizations=authorizations,
-    security='bearer authorizations' 
-)
-
 
 users_ns = Namespace('Users', description='Data about the users')
 campaigns_ns = Namespace('Campaigns', description="Data about the campaigns")
@@ -77,3 +64,22 @@ api.add_namespace(follows_ns, '/follows')
 api.add_namespace(campaign_updates_ns, '/campaign-updates')
 api.add_namespace(admin_reviews_ns,'/admin-reviews')
 api.add_namespace(creator_ns,'/creator')
+
+# Force SQLAlchemy to configure all mappers
+try:
+    from sqlalchemy.orm import configure_mappers
+    configure_mappers()
+except Exception as e:
+    print(f"Warning: Mapper configuration issue: {e}")
+    print("Continuing anyway - this might cause issues with some models")
+
+
+import api.models.cf_models
+import api.routes.usersRoutes
+import api.routes.campaignsRoutes
+import api.routes.comments
+import api.routes.donationRoutes
+import api.routes.creatorDashboardRoutes
+import api.routes.payments
+import api.routes.follows
+import api.routes.admin_reviews
